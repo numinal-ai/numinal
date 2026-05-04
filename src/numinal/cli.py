@@ -67,7 +67,16 @@ def init(directory: str, output: str, tier: int, non_interactive: bool) -> None:
     help="Only check a specific tier (default: check all)",
 )
 @click.option("--json-output", is_flag=True, help="Output as JSON instead of formatted text")
-def validate(file: str, tier: int | None, json_output: bool) -> None:
+@click.option(
+    "--strict", is_flag=True,
+    help="Treat smart-rule warnings as errors (affects exit code)",
+)
+@click.option(
+    "--no-smart-checks", is_flag=True,
+    help="Skip smart cross-field validation rules",
+)
+def validate(file: str, tier: int | None, json_output: bool,
+             strict: bool, no_smart_checks: bool) -> None:
     """Validate a data card against compliance tiers.
 
     Checks FILE (numinal.yaml or datacard.json) against Tier 1 (discovery),
@@ -75,7 +84,7 @@ def validate(file: str, tier: int | None, json_output: bool) -> None:
     """
     from numinal.commands.validate import validate as run_validate
 
-    result = run_validate(file)
+    result = run_validate(file, include_smart_checks=not no_smart_checks)
 
     if result.parse_error:
         console.print(f"[red]Error:[/red] {result.parse_error}")
@@ -86,11 +95,22 @@ def validate(file: str, tier: int | None, json_output: bool) -> None:
     else:
         _print_formatted(result, tier_filter=tier)
 
-    # Exit code: 0 if highest requested tier passes, 1 otherwise
+    # Exit code: 0 if highest requested tier passes, smart-rule errors absent,
+    # and (in strict mode) no warnings either.
     target_tier = tier or 3
+    fail = False
     for tr in result.tiers:
         if tr.tier == target_tier and not tr.passed:
-            raise SystemExit(1)
+            fail = True
+    smart_errors = [d for d in result.smart_diagnostics if d.severity == "error"]
+    if smart_errors:
+        fail = True
+    if strict:
+        smart_warnings = [d for d in result.smart_diagnostics if d.severity == "warning"]
+        if smart_warnings:
+            fail = True
+    if fail:
+        raise SystemExit(1)
 
 
 def _print_formatted(result, tier_filter: int | None = None) -> None:
@@ -157,6 +177,27 @@ def _print_formatted(result, tier_filter: int | None = None) -> None:
         for pr in result.policy_results:
             console.print(f"  Policy '{pr.policy_id}' missing: {', '.join(pr.missing_subfields)}")
 
+    # Smart cross-field checks
+    if result.smart_diagnostics:
+        smart_errors = [d for d in result.smart_diagnostics if d.severity == "error"]
+        smart_warnings = [d for d in result.smart_diagnostics if d.severity == "warning"]
+        smart_info = [d for d in result.smart_diagnostics if d.severity == "info"]
+
+        console.print()
+        console.print("Smart checks:")
+        if smart_errors:
+            console.print(f"  [red]Errors ({len(smart_errors)}):[/red]")
+            for d in smart_errors:
+                console.print(f"    [red][{d.rule_id}][/red] {d.message}")
+        if smart_warnings:
+            console.print(f"  [yellow]Warnings ({len(smart_warnings)}):[/yellow]")
+            for d in smart_warnings:
+                console.print(f"    [yellow][{d.rule_id}][/yellow] {d.message}")
+        if smart_info:
+            console.print(f"  [dim]Info ({len(smart_info)}):[/dim]")
+            for d in smart_info:
+                console.print(f"    [dim][{d.rule_id}] {d.message}[/dim]")
+
     console.print()
 
 
@@ -196,6 +237,15 @@ def _print_json(result) -> None:
         "vocabWarnings": [
             {"field": w.field_path, "term": w.term, "message": w.message}
             for w in result.vocab_warnings if not w.is_error
+        ],
+        "smartChecks": [
+            {
+                "ruleId": d.rule_id,
+                "severity": d.severity,
+                "message": d.message,
+                "fieldPath": d.field_path,
+            }
+            for d in result.smart_diagnostics
         ],
     }
     click.echo(json.dumps(output, indent=2))

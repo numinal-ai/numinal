@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from numinal.commands.smart_rules import SmartDiagnostic, run_all_rules
 from numinal.schema.tiers import (
     ACCESS_POLICY_SUBFIELDS,
     ALL_REQUIREMENTS,
@@ -106,6 +107,7 @@ class ValidationResult:
     tiers: list[TierResult]
     vocab_warnings: list[VocabWarning] = field(default_factory=list)
     policy_results: list[PolicyValidationResult] = field(default_factory=list)
+    smart_diagnostics: list[SmartDiagnostic] = field(default_factory=list)
     parse_error: str | None = None
 
     @property
@@ -438,11 +440,12 @@ def load_card(path: str | Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
-def validate(path: str | Path) -> ValidationResult:
+def validate(path: str | Path, include_smart_checks: bool = True) -> ValidationResult:
     """Validate a data card file against all three tiers.
 
     Returns a complete ValidationResult with tier results,
-    vocabulary warnings, and policy sub-field checks.
+    vocabulary warnings, policy sub-field checks, and (by default)
+    smart cross-field diagnostics.
     """
     card, error = load_card(path)
     if error:
@@ -464,9 +467,13 @@ def validate(path: str | Path) -> ValidationResult:
     # Run access policy sub-field validation
     policy_results = _validate_access_policies(card)
 
+    # Run smart cross-field rules
+    smart_diagnostics = run_all_rules(card) if include_smart_checks else []
+
     return ValidationResult(
         file_path=str(path),
         tiers=tier_results,
         vocab_warnings=vocab_warnings,
         policy_results=policy_results,
+        smart_diagnostics=smart_diagnostics,
     )
