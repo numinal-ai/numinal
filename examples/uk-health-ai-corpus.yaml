@@ -1,0 +1,256 @@
+_spec: numinal-datacard-v1.0-rc1
+name: uk-health-ai-corpus
+description: Synthetic patient records for NHS AI model development
+version: "1.0.0"
+license: OGL-UK-3.0
+creator: NHS Digital
+datePublished: "2026-01-15"
+distribution:
+  - name: patient-records
+    contentType: text/csv
+    fileCount: 12
+    totalSizeBytes: 5000000
+recordSet:
+  - name: patients
+    source: patients.csv
+    fields:
+      - name: patient_id
+        dataType: string
+      - name: age
+        dataType: integer
+      - name: diagnosis_code
+        dataType: string
+    description: De-identified patient records
+
+gov:
+  governanceModel: controlled
+  governanceVersion: "1.0.0"
+  dataController:
+    name: NHS Digital
+    contactEmail: data-governance@nhsdigital.nhs.uk
+    url: https://digital.nhs.uk
+  dataClassification: official-sensitive
+  legalBasis: public-task
+  regulatoryAlignment:
+    - eu-ai-act-art-10
+    - uk-gdpr
+    - nhs-data-sharing-framework
+  lastGovernanceReview: "2026-01-10"
+  licenseGovernanceRelationship:
+    relationship: governance-supersedes
+    explanation: License applies to metadata; governance policies control data access
+  accessPolicies:
+    - policyId: nhs-research-access
+      policyVersion: "1.0.0"
+      description: Access for NHS-affiliated research
+      eligibility:
+        consumerType:
+          - uk-nhs-trust
+          - uk-university
+          - uk-research-institute
+        jurisdictions:
+          - GB
+        requiredCertifications: []
+        requiredApprovals:
+          - ethics-approval-required
+        excludedEntities: []
+      permittedPurposes:
+        - health-biomedical-research
+        - model-training
+        - model-evaluation
+        - bias-auditing
+      prohibitedPurposes:
+        - product-development
+      purposeModifiers:
+        - ethics-approval-required
+        - publication-required
+        - custom:nhs-data-sharing-agreement  # Custom term — should produce warning
+      accessScope:
+        scopeType: full
+        accessMethod: api-query
+        rateLimit:
+          requestsPerDay: 1000
+          maxRecordsPerRequest: 10000
+      retention:
+        maxRetentionDays: 365
+        retentionType: fixed
+        deletionMethod: cryptographic-erasure
+      redistribution:
+        redistributionPermitted: false
+        derivativeWorksPermitted: true
+        derivativeWorkConditions: Must de-identify all outputs
+        sharingWithSubprocessors: permitted-with-approval
+      attribution:
+        attributionText: "NHS Digital, UK Health AI Corpus v1.0"
+        citationRequired: true
+        citationFormat: bibtex
+      auditRequirements:
+        auditRightGranted: true
+        auditFrequency: annual
+      prerequisites:
+        - prerequisiteType: agreement
+          description: NHS Data Sharing Agreement
+          verificationMethod: digital-signature
+      intendedDatasetRole:
+        - training
+        - validation
+        - testing
+      effectiveFrom: "2026-01-15"
+      expiresAt: null
+  publisherSpecialCategoryHandling:
+    specialCategoryDataPresent: true
+    categories:
+      - health-data
+    processingPurpose: bias-detection-correction
+    processingJustification: Required to detect and correct health outcome disparities across demographic groups
+    conditions:
+      a_alternativeDataInsufficient:
+        met: true
+        evidence: Synthetic data tested and found insufficient for bias detection
+      b_technicalReuseLimitations:
+        met: true
+        measures: TRE access only; no bulk export; query audit logging
+      c_accessControlAndConfidentiality:
+        met: true
+        measures: Role-based access control; encryption at rest and in transit
+      d_noThirdPartyTransfer:
+        met: true
+        enforcement: Technical controls prevent data extraction; DUA prohibits transfer
+      e_deletionOnCompletion:
+        met: true
+        mechanism: Automated deletion after DUA expiry; cryptographic erasure
+        retentionPeriodDays: 365
+      f_processingRecords:
+        met: true
+        ropaReference: NHS-ROPA-2026-0142
+        justificationDocumented: true
+
+rai:
+  designChoices:
+    designObjective: Enable development of AI models for NHS patient pathways
+    populationScope: UK adult patients (18+) across all NHS trusts in England
+    inclusionCriteria: All adult patients with a completed care episode in 2024
+    exclusionCriteria: Paediatric patients; incomplete records; opted-out patients
+    exclusionRationale: Paediatric data requires separate governance; incomplete records reduce model quality
+    featureSelectionRationale: Features selected based on clinical informatics expert panel
+    tradeoffs:
+      - tradeoff: Excluded mental health records
+        impact: Models may underperform for patients with mental health comorbidities
+  dataCollection: Extracted from NHS Spine and local trust EHR systems
+  dataOrigin:
+    sources:
+      - name: NHS Spine
+        type: nhs-ehr-system
+        system: Spine2
+        extractionDate: "2025-06-01"
+    originalCollectionPurpose: Direct patient care
+    consentBasis: public-task
+    personalDataPresent: true
+    personalDataCategories:
+      - health-data
+  dataPreparation:
+    annotation:
+      performed: true
+      description: Clinical coding verified by trained NHS coders
+      annotatorCount: 12
+      annotatorQualifications: NHS Clinical Coding qualification
+      annotationGuidelines: https://example.com/coding-guidelines
+      interAnnotatorAgreement:
+        metric: "Cohen's kappa"
+        value: 0.87
+    labelling:
+      performed: false
+      description: ""
+    cleaning:
+      performed: true
+      description: Removed duplicate records; standardised date formats; resolved coding inconsistencies
+      recordsRemovedCount: 1247
+      recordsRemovedPercentage: 0.3
+      removalCriteria: Exact duplicate patient_id + episode_date combinations
+    updating:
+      performed: false
+      description: ""
+    enrichment:
+      performed: false
+      description: ""
+    aggregation:
+      performed: true
+      description: Aggregated from 42 NHS trust extracts
+      aggregationMethod: Union with deduplication on patient_id
+      sourceCount: 42
+  measurementAssumptions:
+    - field: diagnosis_code
+      assumption: ICD-10 codes accurately reflect primary diagnosis
+      knownLimitations: Coding accuracy varies between trusts; known under-coding of comorbidities
+  suitabilityAssessment:
+    quantityAssessment: 450,000 patient records across 42 trusts provides sufficient volume
+    availabilityAssessment: Mental health trust data was not available for this release
+    suitabilityAssessment: Suitable for training models on general adult patient pathways; not suitable for specialist paediatric or mental health models
+    additionalDataNeeded: Mental health trust data; primary care records
+  biasExamination:
+    healthSafetyBiases:
+      - bias: Under-representation of rare diseases
+        potentialHarm: Models may fail to identify rare disease patients
+        severity: medium
+        affectedPopulation: Patients with rare diseases
+        detectionMethod: Prevalence comparison against NCARDRS data
+        mitigationStatus: documented
+        mitigationMeasure: Warning label in model documentation
+    fundamentalRightsBiases: []
+    discriminationBiases:
+      - bias: Age distribution skew toward 50-70 age group
+        protectedCharacteristic: age
+        legalBasis: Equality Act 2010
+        potentialHarm: Reduced model accuracy for younger adults
+        severity: medium
+        affectedPopulation: Adults aged 18-30
+        detectionMethod: Age distribution analysis against ONS population estimates
+        mitigationStatus: partially-mitigated
+        mitigationMeasure: Stratified sampling to reduce skew
+    feedbackLoopRisks:
+      - risk: Historical diagnostic patterns may encode past practice biases
+        mitigationStatus: documented
+        mitigationMeasure: Clinical advisory board review of model outputs
+  complianceGaps:
+    - gap: Mental health trust data not included
+      affectedRequirement: art-10-para-3
+      affectedRequirementText: Data quality criteria for representativeness
+      impactOnCompliance: Representativeness gap for mental health comorbidities
+      severity: medium
+      remediationPlan: Negotiate data sharing agreements with mental health trusts
+      remediationTimeline: "2026-06-30"
+  dataQualityAssessment:
+    relevance:
+      assessment: Highly relevant for NHS patient pathway modelling
+      evidenceBasis: Covers all major care pathways in English NHS trusts
+    representativeness:
+      assessment: Representative of English NHS adult population; Scotland/Wales/NI not included
+      comparisonBasis: ONS mid-year population estimates 2024
+      knownGaps: Mental health trusts; primary care; devolved nations
+    errorRate:
+      assessment: Estimated 2.1% coding error rate based on clinical audit
+      auditMethodology: Random sample of 5000 records reviewed by senior clinical coders
+      errorTypes: ICD-10 miscoding; date transcription errors
+    completeness:
+      assessment: 97.8% record completeness
+      missingDataByField:
+        age: 0.2
+        diagnosis_code: 1.1
+        postcode: 0.9
+      missingDataStrategy: Records with missing primary diagnosis excluded; other missing fields imputed as null
+    statisticalProperties: Normal age distribution with mean 54.2 (SD 18.1)
+    combinedDatasetNote: ""
+  geographicContext:
+    dataOriginCountries:
+      - GB
+    dataOriginRegions:
+      - England
+    intendedDeploymentContext: NHS England clinical decision support
+    contextualAlignment: Data collected from the same context as intended deployment
+    knownContextualLimitations: Does not cover devolved nation NHS systems
+  contextualCharacteristics:
+    languageCharacteristics: English clinical terminology; ICD-10 codes
+    culturalConsiderations: UK healthcare system context; may not transfer to other healthcare systems
+    temporalCoverage: 2024 calendar year
+    functionalContext: Secondary care inpatient and outpatient episodes
+  additionalGovernancePractices: ""
