@@ -15,3 +15,4 @@ venv/
 *.swo
 .DS_Store
 .numinal/
+src/numinal/_version.py
