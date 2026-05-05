@@ -29,6 +29,9 @@ gov:
     name: NHS Digital
     contactEmail: data-governance@nhsdigital.nhs.uk
     url: https://digital.nhs.uk
+  dataProtectionOfficer:
+    name: NHS Digital DPO
+    contactEmail: dpo@nhsdigital.nhs.uk
   dataClassification: official-sensitive
   legalBasis: public-task
   regulatoryAlignment:
@@ -39,6 +42,17 @@ gov:
   licenseGovernanceRelationship:
     relationship: governance-supersedes
     explanation: License applies to metadata; governance policies control data access
+  fundingSource:
+    funderName: UK Government (HMG)
+    programmeName: NHS AI Lab
+    grantReference: NHSAI-2025-0042
+    fundingTrack: non-commercial
+    reportingBody: NHS England
+  impactReporting:
+    metricsRequired:
+      - unique-consumer-organisations
+      - total-api-calls
+    reportingFrequency: quarterly
   accessPolicies:
     - policyId: nhs-research-access
       policyVersion: "1.0.0"

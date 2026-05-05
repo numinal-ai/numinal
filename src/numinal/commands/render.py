@@ -65,6 +65,14 @@ def render_markdown(path: str | Path) -> tuple[str | None, str | None]:
             if dc.get("contactEmail"):
                 lines.append(f"**Contact:** {dc['contactEmail']}")
 
+        dpo = gov.get("dataProtectionOfficer", {})
+        if isinstance(dpo, dict) and dpo.get("name"):
+            email = dpo.get("contactEmail")
+            if email:
+                lines.append(f"**Data protection officer:** {dpo['name']} ({email})")
+            else:
+                lines.append(f"**Data protection officer:** {dpo['name']}")
+
         alignment = gov.get("regulatoryAlignment", [])
         if alignment:
             lines.append(f"**Regulatory alignment:** {', '.join(alignment)}")
@@ -74,6 +82,33 @@ def render_markdown(path: str | Path) -> tuple[str | None, str | None]:
             lines.append(f"**License-governance:** {lgr['relationship']}")
             if lgr.get("explanation"):
                 lines.append(f"  — {lgr['explanation']}")
+
+        funding = gov.get("fundingSource", {})
+        if isinstance(funding, dict) and funding.get("funderName"):
+            for key, label in [
+                ("funderName", "Funder"),
+                ("programmeName", "Programme"),
+                ("grantReference", "Grant reference"),
+                ("fundingAmount", "Funding amount"),
+                ("fundingTrack", "Track"),
+                ("reportingBody", "Reporting body"),
+            ]:
+                val = funding.get(key)
+                if val:
+                    lines.append(f"**{label}:** {val}")
+
+        impact = gov.get("impactReporting", {})
+        if isinstance(impact, dict):
+            metrics = impact.get("metricsRequired", []) or []
+            freq = impact.get("reportingFrequency", "")
+            if metrics or freq:
+                parts = []
+                if freq:
+                    parts.append(freq)
+                if metrics:
+                    parts.append(", ".join(metrics))
+                lines.append(f"**Impact reporting:** {' — '.join(parts)}")
+
         lines.append("")
 
     # --- Distribution ---
@@ -185,6 +220,41 @@ def render_markdown(path: str | Path) -> tuple[str | None, str | None]:
                             lines.append(f"  - Sources aggregated: {op['sourceCount']}")
                 lines.append("")
 
+        # --- Measurement Assumptions ---
+        ma = rai.get("measurementAssumptions", [])
+        if isinstance(ma, list) and ma:
+            lines.append("### Measurement Assumptions — Art. 10(2)(d)")
+            lines.append("")
+            lines.append("| Field | Assumption | Known limitations |")
+            lines.append("|-------|-----------|-------------------|")
+            for entry in ma:
+                if not isinstance(entry, dict):
+                    continue
+                fld = entry.get("field", "")
+                assumption = entry.get("assumption", "")
+                kl = entry.get("knownLimitations", "")
+                lines.append(f"| `{fld}` | {assumption} | {kl} |")
+            lines.append("")
+
+        # --- Suitability Assessment ---
+        sa = rai.get("suitabilityAssessment", {})
+        if isinstance(sa, dict):
+            sa_lines: list[str] = []
+            for key, label in [
+                ("quantityAssessment", "Quantity"),
+                ("availabilityAssessment", "Availability"),
+                ("suitabilityAssessment", "Suitability"),
+                ("additionalDataNeeded", "Additional data needed"),
+            ]:
+                val = sa.get(key, "")
+                if val and not str(val).startswith("TODO"):
+                    sa_lines.append(f"**{label}:** {val}")
+            if sa_lines:
+                lines.append("### Suitability Assessment — Art. 10(2)(e)")
+                lines.append("")
+                lines.extend(sa_lines)
+                lines.append("")
+
         # --- Bias Examination ---
         bias = rai.get("biasExamination", {})
         if bias and isinstance(bias, dict):
@@ -266,6 +336,62 @@ def render_markdown(path: str | Path) -> tuple[str | None, str | None]:
                     lines.append(f"**Limitations:** {geo['knownContextualLimitations']}")
                 lines.append("")
 
+        # --- Contextual Characteristics ---
+        cc = rai.get("contextualCharacteristics", {})
+        if isinstance(cc, dict):
+            cc_lines: list[str] = []
+            for key, label in [
+                ("languageCharacteristics", "Language"),
+                ("culturalConsiderations", "Cultural considerations"),
+                ("temporalCoverage", "Temporal coverage"),
+                ("functionalContext", "Functional context"),
+            ]:
+                val = cc.get(key, "")
+                if val and not str(val).startswith("TODO"):
+                    cc_lines.append(f"**{label}:** {val}")
+            if cc_lines:
+                lines.append("### Contextual Characteristics — Art. 10(4)")
+                lines.append("")
+                lines.extend(cc_lines)
+                lines.append("")
+
+        # --- Special Category Data (data lives in gov, but renders within RAI block) ---
+        sch = gov.get("publisherSpecialCategoryHandling", {})
+        if isinstance(sch, dict) and sch.get("specialCategoryDataPresent"):
+            lines.append("### Special Category Data — Art. 10(5)")
+            lines.append("")
+            cats = sch.get("categories", [])
+            if cats:
+                lines.append(f"**Categories:** {', '.join(cats)}")
+            pp = sch.get("processingPurpose")
+            if pp:
+                lines.append(f"**Processing purpose:** {pp}")
+            pj = sch.get("processingJustification")
+            if pj:
+                lines.append(f"**Justification:** {pj}")
+            conditions = sch.get("conditions", {})
+            if isinstance(conditions, dict) and conditions:
+                lines.append("")
+                lines.append("**Article 10(5) conditions:**")
+                for key, label, text_key in [
+                    ("a_alternativeDataInsufficient", "(a) Alternative data insufficient", "evidence"),
+                    ("b_technicalReuseLimitations", "(b) Technical reuse limitations", "measures"),
+                    ("c_accessControlAndConfidentiality", "(c) Access control and confidentiality", "measures"),
+                    ("d_noThirdPartyTransfer", "(d) No third-party transfer", "enforcement"),
+                    ("e_deletionOnCompletion", "(e) Deletion on completion", "mechanism"),
+                    ("f_processingRecords", "(f) Processing records", "ropaReference"),
+                ]:
+                    cond = conditions.get(key)
+                    if not isinstance(cond, dict):
+                        continue
+                    icon = "✓" if cond.get("met") else "✗"
+                    text = cond.get(text_key, "")
+                    if text:
+                        lines.append(f"- {label}: {icon} — {text}")
+                    else:
+                        lines.append(f"- {label}: {icon}")
+            lines.append("")
+
     # --- Access Policies ---
     policies = gov.get("accessPolicies", [])
     if policies:
@@ -309,6 +435,53 @@ def render_markdown(path: str | Path) -> tuple[str | None, str | None]:
             if roles:
                 lines.append(f"**Dataset role:** {', '.join(roles)}")
             lines.append("")
+
+    # --- Derived From ---
+    derived = gov.get("derivedFrom", [])
+    if isinstance(derived, list) and derived:
+        lines.append("## Derived From")
+        lines.append("")
+        for entry in derived:
+            if not isinstance(entry, dict):
+                continue
+            src = entry.get("sourceDataset") or {}
+            src_name = src.get("name", "unnamed source") if isinstance(src, dict) else "unnamed source"
+            ver = src.get("version", "") if isinstance(src, dict) else ""
+            policy = entry.get("accessPolicyUsed", "")
+            access_date = entry.get("accessDate", "")
+
+            header = f"**{src_name}**"
+            if ver:
+                header = f"**{src_name}** (v{ver})"
+            tail_bits = []
+            if policy:
+                tail_bits.append(f"accessed under {policy}")
+            if access_date:
+                tail_bits.append(f"on {access_date}")
+            suffix = f" — {' '.join(tail_bits)}" if tail_bits else ""
+            lines.append(f"- {header}{suffix}")
+
+            dm = entry.get("derivationMethod", "")
+            if dm:
+                lines.append(f"  - Derivation method: {dm}")
+
+            ic = entry.get("inheritedConstraints", [])
+            if isinstance(ic, list) and ic:
+                ic_parts: list[str] = []
+                for c in ic:
+                    if not isinstance(c, dict):
+                        continue
+                    cs = c.get("constraint", "")
+                    if not cs:
+                        continue
+                    addr = c.get("howAddressed", "")
+                    if addr:
+                        ic_parts.append(f"{cs} (addressed: {addr})")
+                    else:
+                        ic_parts.append(cs)
+                if ic_parts:
+                    lines.append(f"  - Inherited constraints: {'; '.join(ic_parts)}")
+        lines.append("")
 
     # --- Footer ---
     lines.append("---")

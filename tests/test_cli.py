@@ -848,3 +848,215 @@ class TestRender:
         md, _ = render_markdown(path)
         assert "TODO:" not in md
         assert "Actual population description" in md
+
+    def test_render_includes_measurement_assumptions(self, tmp_path):
+        """rai.measurementAssumptions renders an Art. 10(2)(d) section."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {"governanceModel": "open", "governanceVersion": "1.0.0"},
+            "rai": {
+                "measurementAssumptions": [
+                    {
+                        "field": "toa",
+                        "assumption": "Perfect timing of arrival",
+                        "knownLimitations": "Real-world ToA jitter not modelled",
+                    },
+                ],
+            },
+        }
+        path = tmp_path / "ma.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "Art. 10(2)(d)" in md
+        assert "Measurement Assumptions" in md
+        assert "`toa`" in md
+        assert "Perfect timing of arrival" in md
+
+    def test_render_includes_suitability(self, tmp_path):
+        """rai.suitabilityAssessment renders an Art. 10(2)(e) section."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {"governanceModel": "open", "governanceVersion": "1.0.0"},
+            "rai": {
+                "suitabilityAssessment": {
+                    "quantityAssessment": "450k records is sufficient",
+                    "availabilityAssessment": "Mental-health trust data unavailable",
+                    "suitabilityAssessment": "Suitable for general adult pathways only",
+                    "additionalDataNeeded": "Mental-health and primary-care records",
+                },
+            },
+        }
+        path = tmp_path / "sa.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "Art. 10(2)(e)" in md
+        assert "Suitability Assessment" in md
+        assert "**Quantity:**" in md
+        assert "450k records" in md
+        assert "Mental-health and primary-care records" in md
+
+    def test_render_skips_empty_sections(self, tmp_path):
+        """Empty measurementAssumptions/suitabilityAssessment should not render headers."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {"governanceModel": "open", "governanceVersion": "1.0.0"},
+            "rai": {
+                "measurementAssumptions": [],
+                "suitabilityAssessment": {
+                    "quantityAssessment": "",
+                    "availabilityAssessment": "",
+                    "suitabilityAssessment": "TODO: fill this in",
+                    "additionalDataNeeded": "",
+                },
+                "contextualCharacteristics": {
+                    "languageCharacteristics": "",
+                    "culturalConsiderations": "",
+                    "temporalCoverage": "",
+                    "functionalContext": "",
+                },
+            },
+        }
+        path = tmp_path / "empty.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "Measurement Assumptions" not in md
+        assert "Suitability Assessment" not in md
+        assert "Contextual Characteristics" not in md
+        assert "Art. 10(2)(d)" not in md
+        assert "Art. 10(2)(e)" not in md
+        assert "TODO" not in md
+
+    def test_render_includes_special_category_handling(self, tmp_path):
+        """gov.publisherSpecialCategoryHandling renders an Art. 10(5) section with conditions."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {
+                "governanceModel": "controlled", "governanceVersion": "1.0.0",
+                "publisherSpecialCategoryHandling": {
+                    "specialCategoryDataPresent": True,
+                    "categories": ["health-data"],
+                    "processingPurpose": "bias-detection-correction",
+                    "processingJustification": "Required to detect outcome disparities",
+                    "conditions": {
+                        "a_alternativeDataInsufficient": {
+                            "met": True, "evidence": "Synthetic data tested and insufficient",
+                        },
+                        "d_noThirdPartyTransfer": {"met": False, "enforcement": ""},
+                    },
+                },
+            },
+            "rai": {"designChoices": {"designObjective": "ok"}},
+        }
+        path = tmp_path / "scd.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "Art. 10(5)" in md
+        assert "Special Category Data" in md
+        assert "health-data" in md
+        assert "bias-detection-correction" in md
+        assert "✓" in md
+        assert "✗" in md
+
+    def test_render_special_category_skipped_when_absent(self, tmp_path):
+        """specialCategoryDataPresent: false should suppress the section."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {
+                "governanceModel": "open", "governanceVersion": "1.0.0",
+                "publisherSpecialCategoryHandling": {
+                    "specialCategoryDataPresent": False,
+                    "categories": [],
+                },
+            },
+            "rai": {"designChoices": {"designObjective": "ok"}},
+        }
+        path = tmp_path / "no-scd.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "Art. 10(5)" not in md
+        assert "Special Category Data" not in md
+
+    def test_render_includes_funding_and_dpo(self, tmp_path):
+        """gov.fundingSource and gov.dataProtectionOfficer render in the Governance block."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {
+                "governanceModel": "open", "governanceVersion": "1.0.0",
+                "dataController": {"name": "Test Org", "contactEmail": "dc@example.org"},
+                "dataProtectionOfficer": {"name": "Dana Officer", "contactEmail": "dpo@example.org"},
+                "fundingSource": {
+                    "funderName": "UKRI",
+                    "programmeName": "AI for Public Good",
+                    "fundingTrack": "non-commercial",
+                },
+                "impactReporting": {
+                    "metricsRequired": ["unique-consumer-organisations", "total-api-calls"],
+                    "reportingFrequency": "quarterly",
+                },
+            },
+        }
+        path = tmp_path / "funding.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "Data protection officer" in md
+        assert "Dana Officer" in md
+        assert "dpo@example.org" in md
+        assert "**Funder:** UKRI" in md
+        assert "AI for Public Good" in md
+        assert "Impact reporting" in md
+        assert "quarterly" in md
+        assert "unique-consumer-organisations" in md
+
+    def test_render_includes_derived_from(self, tmp_path):
+        """gov.derivedFrom renders a top-level provenance section."""
+        from numinal.commands.render import render_markdown
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {
+                "governanceModel": "open", "governanceVersion": "1.0.0",
+                "derivedFrom": [
+                    {
+                        "sourceDataset": {"name": "source-dataset", "version": "1.0"},
+                        "accessPolicyUsed": "policy-id",
+                        "accessDate": "2026-01-01",
+                        "derivationMethod": "Filtered to UK records only",
+                        "inheritedConstraints": [
+                            {
+                                "constraint": "no-redistribution",
+                                "inherited": True,
+                                "howAddressed": "Same prohibition carried into derived policy",
+                            },
+                        ],
+                    },
+                ],
+            },
+        }
+        path = tmp_path / "derived.yaml"
+        path.write_text(yaml.dump(card))
+        md, _ = render_markdown(path)
+        assert "## Derived From" in md
+        assert "**source-dataset** (v1.0)" in md
+        assert "accessed under policy-id" in md
+        assert "on 2026-01-01" in md
+        assert "Filtered to UK records only" in md
+        assert "no-redistribution" in md
