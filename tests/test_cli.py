@@ -747,6 +747,39 @@ class TestCompliance:
         role_check = next(c for c in result.checks if c.clause == "10(6)")
         assert role_check.passed
 
+    def test_dataset_role_at_gov_level(self, tmp_path):
+        """10(6) passes when gov.intendedDatasetRole is set without access policies."""
+        from numinal.commands.compliance import check_compliance
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {
+                "governanceModel": "open", "governanceVersion": "1.0.0",
+                "intendedDatasetRole": ["training"],
+            },
+        }
+        path = tmp_path / "role-at-gov.yaml"
+        path.write_text(yaml.dump(card))
+        result = check_compliance(path)
+        role_check = next(c for c in result.checks if c.clause == "10(6)")
+        assert role_check.passed
+
+    def test_dataset_role_missing(self, tmp_path):
+        """10(6) fails when intendedDatasetRole is set neither on gov nor in any policy."""
+        from numinal.commands.compliance import check_compliance
+        card = {
+            "name": "test", "description": "test", "version": "1.0.0",
+            "license": "MIT", "creator": "test",
+            "distribution": [{"name": "d"}],
+            "gov": {"governanceModel": "open", "governanceVersion": "1.0.0"},
+        }
+        path = tmp_path / "role-missing.yaml"
+        path.write_text(yaml.dump(card))
+        result = check_compliance(path)
+        role_check = next(c for c in result.checks if c.clause == "10(6)")
+        assert not role_check.passed
+
 
 # ---------------------------------------------------------------------------
 # Render command tests

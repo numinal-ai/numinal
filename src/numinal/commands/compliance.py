@@ -157,7 +157,7 @@ ART_10_REQUIREMENTS: list[Art10Requirement] = [
     Art10Requirement(
         clause="10(6)",
         label="Dataset role distinction",
-        field_paths=["intendedDatasetRole"],
+        field_paths=["gov.intendedDatasetRole"],
     ),
 ]
 
@@ -202,13 +202,11 @@ class ComplianceResult:
 # ---------------------------------------------------------------------------
 
 def _find_intended_role(card: dict[str, Any]) -> bool:
-    """Check if intendedDatasetRole is set anywhere — top-level or in a policy."""
-    # Check top-level
-    top = _resolve_path(card, "intendedDatasetRole")
-    if _is_populated(top):
+    """Check if intendedDatasetRole is set on gov or inside any access policy."""
+    gov_level = _resolve_path(card, "gov.intendedDatasetRole")
+    if _is_populated(gov_level):
         return True
 
-    # Check inside access policies
     policies = _resolve_path(card, "gov.accessPolicies")
     if isinstance(policies, list):
         for policy in policies:
