@@ -36,7 +36,12 @@ def cli() -> None:
     help="Target compliance tier to scaffold (1=discovery, 2=regulatory, 3=governed sharing)",
 )
 @click.option("--non-interactive", is_flag=True, help="Skip prompts and use defaults")
-def init(directory: str, output: str, tier: int, non_interactive: bool) -> None:
+@click.option(
+    "--from-croissant", "from_croissant", default=None, metavar="PATH-OR-URL",
+    help="Bootstrap fields from an existing Croissant JSON-LD document (local path or URL)",
+)
+def init(directory: str, output: str, tier: int, non_interactive: bool,
+         from_croissant: str | None) -> None:
     """Generate a new data card from a dataset directory.
 
     Scans DIRECTORY for files, detects structure, and creates a numinal.yaml
@@ -45,7 +50,13 @@ def init(directory: str, output: str, tier: int, non_interactive: bool) -> None:
     from numinal.commands.init import run_init
 
     try:
-        run_init(directory, output=output, tier=tier, non_interactive=non_interactive)
+        run_init(
+            directory,
+            output=output,
+            tier=tier,
+            non_interactive=non_interactive,
+            from_croissant=from_croissant,
+        )
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1)

@@ -2,19 +2,16 @@
 
 Implements spec §11.5:
   - File types, sizes, counts, SHA-256 checksums
-  - Column names, data types, cardinality, null rates, basic statistics (tabular)
   - Existing README, LICENSE, Croissant metadata, HuggingFace dataset cards
 """
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -28,32 +25,13 @@ class FileInfo:
 
 
 @dataclass
-class ColumnInfo:
-    """Detected column metadata for tabular files."""
-    name: str
-    inferred_type: str
-    null_count: int
-    total_count: int
-    cardinality: int | None = None
-
-    @property
-    def null_rate(self) -> float:
-        return self.null_count / self.total_count if self.total_count > 0 else 0.0
-
-
-@dataclass
 class DetectionResult:
     """Results of auto-detection on a dataset directory."""
     root_path: str
     files: list[FileInfo] = field(default_factory=list)
-    columns: dict[str, list[ColumnInfo]] = field(default_factory=dict)  # filename -> columns
     existing_metadata: dict[str, str] = field(default_factory=dict)  # type -> path
     total_size_bytes: int = 0
     file_type_counts: dict[str, int] = field(default_factory=dict)
-
-    @property
-    def has_tabular_data(self) -> bool:
-        return any(ext in self.file_type_counts for ext in (".csv", ".tsv", ".parquet", ".jsonl"))
 
     @property
     def has_existing_croissant(self) -> bool:
@@ -72,7 +50,6 @@ class DetectionResult:
 _SKIP_DIRS = {".git", ".hg", "__pycache__", "node_modules", ".venv", "venv", ".numinal"}
 _MAX_FILES = 10_000  # Safety limit
 _HASH_CHUNK_SIZE = 8192
-_CSV_SAMPLE_ROWS = 1000  # Rows to sample for column analysis
 
 
 def _sha256(path: Path) -> str:
@@ -100,7 +77,6 @@ def _detect_metadata_files(root: Path) -> dict[str, str]:
         elif lower.startswith("license") or lower == "licence" or lower.startswith("licence"):
             metadata["license"] = str(full)
         elif lower in ("croissant.json", "metadata.json"):
-            # Check if it looks like Croissant
             try:
                 with open(full) as f:
                     data = json.load(f)
@@ -116,84 +92,12 @@ def _detect_metadata_files(root: Path) -> dict[str, str]:
     return metadata
 
 
-def _infer_column_type(values: list[str]) -> str:
-    """Infer column type from sample string values."""
-    non_empty = [v for v in values if v.strip()]
-    if not non_empty:
-        return "unknown"
-
-    # Try int
-    int_count = 0
-    float_count = 0
-    bool_count = 0
-    for v in non_empty:
-        try:
-            int(v)
-            int_count += 1
-            continue
-        except ValueError:
-            pass
-        try:
-            float(v)
-            float_count += 1
-            continue
-        except ValueError:
-            pass
-        if v.lower() in ("true", "false", "yes", "no", "0", "1"):
-            bool_count += 1
-
-    total = len(non_empty)
-    if int_count == total:
-        return "integer"
-    if (int_count + float_count) == total:
-        return "float"
-    if bool_count == total:
-        return "boolean"
-    return "string"
-
-
-def _analyse_csv(path: Path, delimiter: str = ",") -> list[ColumnInfo]:
-    """Analyse a CSV/TSV file and return column info."""
-    columns: list[ColumnInfo] = []
-    try:
-        with open(path, newline="", encoding="utf-8", errors="replace") as f:
-            reader = csv.reader(f, delimiter=delimiter)
-            headers = next(reader, None)
-            if not headers:
-                return columns
-
-            # Collect samples
-            col_values: list[list[str]] = [[] for _ in headers]
-            row_count = 0
-            for row in reader:
-                if row_count >= _CSV_SAMPLE_ROWS:
-                    break
-                for i, val in enumerate(row):
-                    if i < len(col_values):
-                        col_values[i].append(val)
-                row_count += 1
-
-            for i, header in enumerate(headers):
-                vals = col_values[i] if i < len(col_values) else []
-                null_count = sum(1 for v in vals if v.strip() == "")
-                unique_vals = set(vals) - {""}
-                columns.append(ColumnInfo(
-                    name=header.strip(),
-                    inferred_type=_infer_column_type(vals),
-                    null_count=null_count,
-                    total_count=len(vals),
-                    cardinality=len(unique_vals),
-                ))
-    except (OSError, csv.Error):
-        pass
-    return columns
-
-
 def detect(directory: str | Path) -> DetectionResult:
     """Run auto-detection on a dataset directory.
 
-    Scans the directory tree for files, computes checksums, analyses
-    tabular data, and detects existing metadata files.
+    Scans the directory tree for files, computes checksums, and detects
+    existing metadata files. Does not read file contents for analysis —
+    recordSet schemas are publisher-supplied.
     """
     root = Path(directory).resolve()
     if not root.is_dir():
@@ -204,7 +108,6 @@ def detect(directory: str | Path) -> DetectionResult:
 
     file_count = 0
     for dirpath, dirnames, filenames in os.walk(root):
-        # Prune skipped directories
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
 
         for fname in filenames:
@@ -218,8 +121,6 @@ def detect(directory: str | Path) -> DetectionResult:
             ext = fpath.suffix.lower()
             size = fpath.stat().st_size
             rel = str(fpath.relative_to(root))
-
-            # Compute checksum
             checksum = _sha256(fpath)
 
             result.files.append(FileInfo(
@@ -232,15 +133,5 @@ def detect(directory: str | Path) -> DetectionResult:
             result.total_size_bytes += size
             result.file_type_counts[ext] = result.file_type_counts.get(ext, 0) + 1
             file_count += 1
-
-            # Analyse tabular files
-            if ext == ".csv":
-                cols = _analyse_csv(fpath, delimiter=",")
-                if cols:
-                    result.columns[rel] = cols
-            elif ext == ".tsv":
-                cols = _analyse_csv(fpath, delimiter="\t")
-                if cols:
-                    result.columns[rel] = cols
 
     return result

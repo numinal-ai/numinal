@@ -771,8 +771,14 @@ Score: 10/13 requirements met
 
 The CLI auto-detects from the dataset directory:
 - File types, sizes, counts, SHA-256 checksums
-- Column names, data types, cardinality, null rates, basic statistics (for tabular data)
 - Existing README, LICENSE, Croissant metadata, HuggingFace dataset cards
+
+The CLI does not profile dataset contents. Schema details (field names, data
+types, null rates, cardinality) are publisher-supplied — filled in by hand,
+imported from a profiling tool, or bootstrapped from existing Croissant
+metadata via `numinal init --from-croissant <path-or-url>`, which extracts
+`name`, `description`, `version`, `license`, `creator`, `datePublished`,
+`distribution`, and `recordSet` and scaffolds the governance layer on top.
 
 ---
 

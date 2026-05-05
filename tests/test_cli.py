@@ -377,28 +377,6 @@ class TestDetection:
         assert len(result.files) == 3
         assert ".csv" in result.file_type_counts
 
-    def test_detect_columns(self, tmp_dataset):
-        result = detect(tmp_dataset)
-        assert "data.csv" in result.columns
-        cols = result.columns["data.csv"]
-        col_names = {c.name for c in cols}
-        assert col_names == {"id", "name", "value"}
-
-    def test_detect_null_rates(self, tmp_dataset):
-        result = detect(tmp_dataset)
-        cols = result.columns["data.csv"]
-        name_col = next(c for c in cols if c.name == "name")
-        assert name_col.null_count == 1  # One empty value in test data
-        assert name_col.null_rate == pytest.approx(1 / 3, rel=0.01)
-
-    def test_detect_types(self, tmp_dataset):
-        result = detect(tmp_dataset)
-        cols = result.columns["data.csv"]
-        id_col = next(c for c in cols if c.name == "id")
-        value_col = next(c for c in cols if c.name == "value")
-        assert id_col.inferred_type == "integer"
-        assert value_col.inferred_type == "integer"
-
     def test_detect_metadata(self, tmp_dataset):
         result = detect(tmp_dataset)
         assert result.has_existing_license
@@ -458,13 +436,198 @@ class TestInit:
             assert "sha256" in f
             assert "sizeBytes" in f
 
-    def test_init_detects_record_sets(self, tmp_dataset):
-        output = run_init(str(tmp_dataset), non_interactive=True)
+    def test_init_t1_omits_record_set(self, tmp_dataset):
+        """T1 init should not include a recordSet — schema is publisher-supplied at T2+."""
+        output = run_init(str(tmp_dataset), non_interactive=True, tier=1)
         card = yaml.safe_load(output.read_text())
-        assert "recordSet" in card
-        assert card["recordSet"][0]["name"] == "data"
-        fields = card["recordSet"][0]["fields"]
-        assert len(fields) == 3
+        assert "recordSet" not in card
+
+    def test_init_t2_scaffolds_empty_record_set(self, tmp_dataset):
+        """T2 init scaffolds an empty recordSet for the publisher to fill in."""
+        output = run_init(str(tmp_dataset), non_interactive=True, tier=2)
+        card = yaml.safe_load(output.read_text())
+        assert card.get("recordSet") == []
+
+
+# ---------------------------------------------------------------------------
+# Croissant bootstrap tests
+# ---------------------------------------------------------------------------
+
+class TestCroissantBootstrap:
+    """Test the Croissant JSON-LD loader and field extractor."""
+
+    @pytest.fixture
+    def croissant_doc(self):
+        """A minimal Croissant JSON-LD document covering the fields we map."""
+        return {
+            "@context": {
+                "@vocab": "https://schema.org/",
+                "cr": "http://mlcommons.org/croissant/",
+                "sc": "https://schema.org/",
+            },
+            "@type": "sc:Dataset",
+            "name": "uk-health-corpus",
+            "description": "Anonymised NHS corpus for AI research.",
+            "version": "2.1.0",
+            "license": "https://creativecommons.org/licenses/by/4.0/",
+            "creator": {"@type": "sc:Organization", "name": "NHS England"},
+            "datePublished": "2025-09-01",
+            "distribution": [
+                {
+                    "@type": "cr:FileObject",
+                    "name": "records.csv",
+                    "encodingFormat": "text/csv",
+                    "contentSize": "10485760",
+                    "sha256": "abc123",
+                },
+            ],
+            "recordSet": [
+                {
+                    "@type": "cr:RecordSet",
+                    "name": "patients",
+                    "description": "One row per encounter.",
+                    "field": [
+                        {"@type": "cr:Field", "name": "patient_id", "dataType": "sc:Text"},
+                        {"@type": "cr:Field", "name": "age", "dataType": "sc:Integer"},
+                    ],
+                },
+            ],
+        }
+
+    def test_load_croissant_from_file(self, tmp_path, croissant_doc):
+        from numinal.detection.croissant import load_croissant
+        path = tmp_path / "croissant.json"
+        path.write_text(json.dumps(croissant_doc), encoding="utf-8")
+        loaded = load_croissant(str(path))
+        assert loaded["name"] == "uk-health-corpus"
+
+    def test_load_croissant_missing_file(self, tmp_path):
+        from numinal.detection.croissant import load_croissant
+        with pytest.raises(FileNotFoundError):
+            load_croissant(str(tmp_path / "nope.json"))
+
+    def test_load_croissant_invalid_json(self, tmp_path):
+        from numinal.detection.croissant import load_croissant
+        path = tmp_path / "bad.json"
+        path.write_text("{ not valid", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="not valid JSON"):
+            load_croissant(str(path))
+
+    def test_extract_bootstrap_top_level_fields(self, croissant_doc):
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap(croissant_doc)
+        assert bootstrap["name"] == "uk-health-corpus"
+        assert bootstrap["description"].startswith("Anonymised")
+        assert bootstrap["version"] == "2.1.0"
+        assert bootstrap["license"].startswith("https://creativecommons.org")
+        assert bootstrap["creator"] == "NHS England"
+        assert bootstrap["datePublished"] == "2025-09-01"
+
+    def test_extract_bootstrap_distribution(self, croissant_doc):
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap(croissant_doc)
+        dist = bootstrap["distribution"]
+        assert len(dist) == 1
+        assert dist[0]["name"] == "records.csv"
+        assert dist[0]["contentType"] == "text/csv"
+        assert dist[0]["totalSizeBytes"] == 10485760
+        assert dist[0]["sha256"] == "abc123"
+
+    def test_extract_bootstrap_record_set(self, croissant_doc):
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap(croissant_doc)
+        rs = bootstrap["recordSet"]
+        assert len(rs) == 1
+        assert rs[0]["name"] == "patients"
+        field_names = {f["name"] for f in rs[0]["fields"]}
+        assert field_names == {"patient_id", "age"}
+
+    def test_extract_bootstrap_creator_as_string(self):
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap({"creator": "Solo Author"})
+        assert bootstrap["creator"] == "Solo Author"
+
+    def test_extract_bootstrap_creator_list(self):
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap({
+            "creator": [
+                {"name": "Alice"},
+                {"name": "Bob"},
+            ],
+        })
+        assert bootstrap["creator"] == "Alice, Bob"
+
+    def test_extract_bootstrap_prefixed_keys(self):
+        """sc:-prefixed keys should be picked up when @context omits the prefix mapping."""
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap({
+            "sc:name": "PrefixedName",
+            "sc:description": "Prefixed description",
+        })
+        assert bootstrap["name"] == "PrefixedName"
+        assert bootstrap["description"] == "Prefixed description"
+
+    def test_extract_bootstrap_value_objects(self):
+        """JSON-LD `{"@value": ...}` shape unwraps to the underlying string."""
+        from numinal.detection.croissant import extract_bootstrap
+        bootstrap = extract_bootstrap({
+            "name": {"@value": "WrappedName"},
+            "license": {"@id": "https://example.com/license"},
+        })
+        assert bootstrap["name"] == "WrappedName"
+        assert bootstrap["license"] == "https://example.com/license"
+
+    def test_extract_bootstrap_empty_doc(self):
+        from numinal.detection.croissant import extract_bootstrap
+        assert extract_bootstrap({}) == {}
+
+    def test_init_from_croissant_uses_bootstrap_fields(self, tmp_dataset, croissant_doc):
+        path = tmp_dataset / "croissant.json"
+        path.write_text(json.dumps(croissant_doc), encoding="utf-8")
+        output = run_init(
+            str(tmp_dataset), non_interactive=True, tier=1,
+            from_croissant=str(path),
+        )
+        card = yaml.safe_load(output.read_text())
+        assert card["name"] == "uk-health-corpus"
+        assert card["version"] == "2.1.0"
+        assert card["creator"] == "NHS England"
+        assert card["license"].startswith("https://creativecommons.org")
+
+    def test_init_from_croissant_preserves_record_set_at_t1(self, tmp_dataset, croissant_doc):
+        """A Croissant-supplied recordSet survives even at T1."""
+        path = tmp_dataset / "croissant.json"
+        path.write_text(json.dumps(croissant_doc), encoding="utf-8")
+        output = run_init(
+            str(tmp_dataset), non_interactive=True, tier=1,
+            from_croissant=str(path),
+        )
+        card = yaml.safe_load(output.read_text())
+        assert card.get("recordSet")
+        assert card["recordSet"][0]["name"] == "patients"
+
+    def test_init_from_croissant_uses_croissant_distribution(self, tmp_dataset, croissant_doc):
+        path = tmp_dataset / "croissant.json"
+        path.write_text(json.dumps(croissant_doc), encoding="utf-8")
+        output = run_init(
+            str(tmp_dataset), non_interactive=True, tier=1,
+            from_croissant=str(path),
+        )
+        card = yaml.safe_load(output.read_text())
+        names = {d.get("name") for d in card["distribution"]}
+        assert "records.csv" in names
+
+    def test_init_from_croissant_keeps_file_manifest(self, tmp_dataset, croissant_doc):
+        """File manifest still comes from the directory scan, not the Croissant."""
+        path = tmp_dataset / "croissant.json"
+        path.write_text(json.dumps(croissant_doc), encoding="utf-8")
+        output = run_init(
+            str(tmp_dataset), non_interactive=True, tier=1,
+            from_croissant=str(path),
+        )
+        card = yaml.safe_load(output.read_text())
+        manifest_paths = {f["path"] for f in card["_fileManifest"]}
+        assert "data.csv" in manifest_paths
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,10 @@ pip install numinal
 # Generate a data card from your dataset directory
 numinal init ./my-dataset/ --tier 2
 
+# Or bootstrap from an existing Croissant JSON-LD document
+numinal init ./my-dataset/ --from-croissant ./croissant.json --tier 2
+numinal init ./my-dataset/ --from-croissant https://example.org/dataset/croissant.json
+
 # Validate against compliance tiers
 numinal validate ./my-dataset/numinal.yaml
 
@@ -95,10 +99,11 @@ T3 ⊇ T2 ⊇ T1. Start at T1, add fields as you need them.
 
 `numinal init` scans your dataset directory and auto-detects:
 - File types, sizes, SHA-256 checksums
-- Column names, data types, null rates, cardinality (CSV/TSV)
-- Existing README, LICENSE, Croissant metadata
+- Existing README, LICENSE, Croissant metadata, HuggingFace dataset cards
 
 It generates a `numinal.yaml` — the human-authored source of truth — with TODO markers for fields you need to fill in manually. Run `numinal validate` to see what's missing at each tier.
+
+numinal does not profile your data. Schema details (field names, types, null rates, cardinality) are publisher-supplied: either filled in by hand at T2+, imported from a profiling tool, or bootstrapped from existing Croissant metadata via `numinal init --from-croissant <path-or-url>`.
 
 ## Schema
 

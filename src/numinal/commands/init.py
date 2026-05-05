@@ -1,7 +1,8 @@
 """numinal init — generate a new data card from a dataset directory.
 
 Implements spec §11.2 and §11.5:
-  - Auto-detects file types, sizes, checksums, columns (§11.5)
+  - Auto-detects file types, sizes, checksums (§11.5)
+  - Detects existing metadata (README, LICENSE, Croissant, HF cards)
   - Prompts for required T1 fields
   - Scaffolds T2/T3 sections with TODO markers
   - Outputs numinal.yaml as the human-authored source of truth (§2.2)
@@ -17,6 +18,7 @@ import click
 import yaml
 
 from numinal.detection.auto import detect, DetectionResult
+from numinal.detection.croissant import extract_bootstrap, load_croissant
 from numinal.schema.vocabularies import (
     DATA_CLASSIFICATIONS,
     GOVERNANCE_MODELS,
@@ -57,33 +59,6 @@ def _build_distribution(detection: DetectionResult) -> list[dict[str, Any]]:
         })
 
     return distributions
-
-
-def _build_record_sets(detection: DetectionResult) -> list[dict[str, Any]]:
-    """Build record set definitions from detected tabular columns."""
-    record_sets: list[dict[str, Any]] = []
-
-    for filename, columns in detection.columns.items():
-        fields = []
-        for col in columns:
-            field_def: dict[str, Any] = {
-                "name": col.name,
-                "dataType": col.inferred_type,
-            }
-            if col.null_count > 0:
-                field_def["nullRate"] = round(col.null_rate, 4)
-            if col.cardinality is not None:
-                field_def["cardinality"] = col.cardinality
-            fields.append(field_def)
-
-        record_sets.append({
-            "name": Path(filename).stem,
-            "source": filename,
-            "fields": fields,
-            "description": "TODO: describe this record set",
-        })
-
-    return record_sets
 
 
 def _mime_for_ext(ext: str) -> str:
@@ -293,6 +268,7 @@ def run_init(
     output: str = "numinal.yaml",
     tier: int = 1,
     non_interactive: bool = False,
+    from_croissant: str | None = None,
 ) -> Path:
     """Run the init command.
 
@@ -301,12 +277,23 @@ def run_init(
         output: Output filename (default: numinal.yaml)
         tier: Target tier to scaffold for (1, 2, or 3)
         non_interactive: Skip prompts and use defaults
+        from_croissant: Optional path or URL to a Croissant JSON-LD document
+            whose fields seed the card (overrides directory-derived defaults
+            and pre-fills prompts in interactive mode).
 
     Returns:
         Path to the generated file
     """
     dataset_dir = Path(directory).resolve()
     output_path = dataset_dir / output
+
+    bootstrap: dict[str, Any] = {}
+    if from_croissant:
+        click.echo(f"\nLoading Croissant from {from_croissant} ...")
+        bootstrap = extract_bootstrap(load_croissant(from_croissant))
+        supplied = sorted(bootstrap.keys())
+        if supplied:
+            click.echo(f"  Bootstrapped: {', '.join(supplied)}")
 
     click.echo(f"\nScanning {dataset_dir} ...")
     detection = detect(dataset_dir)
@@ -315,8 +302,6 @@ def run_init(
     if detection.file_type_counts:
         for ext, count in sorted(detection.file_type_counts.items()):
             click.echo(f"    {ext or '(no ext)'}: {count}")
-    if detection.columns:
-        click.echo(f"  Detected tabular structure in {len(detection.columns)} file(s)")
     if detection.existing_metadata:
         for meta_type, meta_path in detection.existing_metadata.items():
             click.echo(f"  Found existing {meta_type}: {Path(meta_path).name}")
@@ -329,22 +314,36 @@ def run_init(
 
     click.echo()
 
-    # Collect required T1 fields
+    # Collect required T1 fields. Croissant bootstrap values take precedence
+    # over generic defaults; in interactive mode they pre-fill the prompts.
+    name_default = bootstrap.get("name") or dataset_dir.name
+    description_default = bootstrap.get("description") or "TODO: describe this dataset"
+    version_default = bootstrap.get("version") or "0.1.0"
+    license_default = bootstrap.get("license") or "TODO: specify license (e.g., CC-BY-4.0, Apache-2.0)"
+    creator_default = bootstrap.get("creator") or "TODO: creator name"
+    date_published = bootstrap.get("datePublished") or datetime.date.today().isoformat()
+
     if non_interactive:
-        name = dataset_dir.name
-        description = "TODO: describe this dataset"
-        version = "0.1.0"
-        license_val = "TODO: specify license (e.g., CC-BY-4.0, Apache-2.0)"
-        creator = "TODO: creator name"
+        name = name_default
+        description = description_default
+        version = version_default
+        license_val = license_default
+        creator = creator_default
         gov_model = "open"
         data_class = "unclassified"
     else:
         click.echo("── Tier 1 (discovery) required fields ──\n")
-        name = _prompt_required("Dataset name", default=dataset_dir.name)
-        description = _prompt_required("Description")
-        version = _prompt_required("Version", default="0.1.0")
-        license_val = _prompt_required("License (e.g., CC-BY-4.0, Apache-2.0, OGL-UK-3.0)")
-        creator = _prompt_required("Creator (organisation or person name)")
+        name = _prompt_required("Dataset name", default=name_default)
+        description = _prompt_required("Description", default=bootstrap.get("description"))
+        version = _prompt_required("Version", default=version_default)
+        license_val = _prompt_required(
+            "License (e.g., CC-BY-4.0, Apache-2.0, OGL-UK-3.0)",
+            default=bootstrap.get("license"),
+        )
+        creator = _prompt_required(
+            "Creator (organisation or person name)",
+            default=bootstrap.get("creator"),
+        )
         gov_model = _prompt_choice("Governance model", sorted(GOVERNANCE_MODELS), default="open")
         data_class = _prompt_choice("Data classification",
                                      sorted(DATA_CLASSIFICATIONS), default="unclassified")
@@ -358,14 +357,9 @@ def run_init(
         "version": version,
         "license": license_val,
         "creator": creator,
-        "datePublished": datetime.date.today().isoformat(),
-        "distribution": _build_distribution(detection),
+        "datePublished": date_published,
+        "distribution": bootstrap.get("distribution") or _build_distribution(detection),
     }
-
-    # Add record sets if tabular data detected
-    record_sets = _build_record_sets(detection)
-    if record_sets:
-        card["recordSet"] = record_sets
 
     # Add file manifest
     card["_fileManifest"] = [
@@ -392,7 +386,13 @@ def run_init(
         "lastGovernanceReview": "",
     }
 
-    # Scaffold higher tiers if requested
+    # Scaffold higher tiers if requested. A Croissant-supplied recordSet wins
+    # over the empty scaffold even at T1, since it's structured publisher data.
+    if "recordSet" in bootstrap:
+        card["recordSet"] = bootstrap["recordSet"]
+    elif tier >= 2:
+        card["recordSet"] = []
+
     if tier >= 2:
         card["rai"] = _build_rai_scaffold()
 
